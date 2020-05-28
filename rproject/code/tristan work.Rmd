@@ -1,0 +1,131 @@
+---
+title: "A New Index"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Date: February 29, 2020
+
+## Load packages and the COLI data
+```{r}
+library(tidyverse)
+library(sf)
+library(stringr)
+library(magrittr)
+```
+
+## Creating inflation rate variable
+t+ 1 - t -1 / t - 1 * 100
+```{r cars}
+
+# counts of number of times each city is observed
+table(cpi$city)
+
+cpi %<>% filter(city != "N/A") %>%
+  rename(year = Year) %>%
+  group_by(city) %>%
+  mutate(pi = (CPIu/lag(CPIu) - 1)  * 100)
+
+bestcities <- data.frame(table(coliq2$city)) %>% arrange(desc(Freq)) %>%
+  pull(Var1)
+
+coliq2 %<>% 
+  rename(year = YEAR) %>%
+  dplyr::group_by(city) %>%
+  dplyr::mutate(pi_new = (cpi_time_trend/lag(cpi_time_trend) - 1)  * 100,
+                pi_cpi = (CPIu/lag(CPIu) - 1)  * 100) 
+```
+
+### (Check if the pi_old and pi from the CPI data frame are the same)
+This just checks to ensure I've properly created inflation rates.
+
+```{r}
+t1 <- cpi %>% 
+  filter(city == "Houston-The Woodlands-Sugar Land" & year > 1989 & year < 2019) %>% 
+  select(year, pi) 
+t2 <- coliq2 %>% filter(city == "Houston TX") %>% select(year, pi_cpi)
+t1$year
+t2$year
+t1$pi == t2$pi_cpi
+```
+
+## Inflation 2 measures, 2 plots
+```{r}
+## Calculate 3-year moving averages for coli
+coliq2 %<>%
+  group_by(city) %>%
+  mutate(pi_new_ma3 = zoo::rollmean(pi_new, k = 3, fill = NA))
+
+cpi %<>% ungroup()
+coliq2 %<>% ungroup()
+```
+
+### Define plotting function 
+```{R}
+# initialize time frame and which coli city we want to see
+YEARS <- c(1989,2019)
+#COLI_CITY <- "Atlanta GA"
+
+
+plotInflation <- function(COLI_CITY, show.inflation = F, moving.avg = T){
+  TITLE <- ifelse(show.inflation, " Inflation", "")
+  NEW_INDEX <- ifelse(moving.avg, "pi_new_ma3", "pi_new")
+  CPI_CITY <- coli %>%
+    filter(city == COLI_CITY) %>%
+    slice(1) %>%
+    pull(nearest_cpi)
+  #(CPI_CITY)
+  
+  i1 <- cpi %>% filter(city == CPI_CITY) %>%
+    select(year, pi)
+  
+  i2 <- coliq2 %>% filter(city == COLI_CITY) %>%
+    select(year, NEW_INDEX)
+  
+  city_slice_df <- reshape2::melt(full_join(i1, i2, by = "year"),
+                                  id.var='year') %>%
+    rename(Measure = variable) %>%
+    filter(year > YEARS[1] & year < YEARS[2])
+  #print(city_slice_df)
+  
+  ggplot(city_slice_df, aes(y = value, x = year, color = Measure)) + 
+    geom_line(show.legend = F) +
+    labs(title = paste0(COLI_CITY, TITLE),
+         y = "",
+         x = "") + 
+    #scale_color_manual(values = c("red", "blue"),
+                      # labels = c("CPI", "New index")) +
+    theme_minimal()
+}
+# graphy <- ggplot(data = coliq2 %>% filter(city == "Spokane WA"),
+#                  aes(x = YEAR, )) + 
+#   geom_line(y = cpi_time_trend) +
+#   labs(title = "Spokane, WA COLI index time-trended to CPI")
+```
+
+## Draw the plots
+
+Note that the new index uses the 3-year moving average. 
+
+```{r}
+n <- length(bestcities)
+plots <- list()
+for(i in 1:n){
+  plots[i] <- list(plotInflation(bestcities[i]))
+}
+cowplot::plot_grid(plotlist = plots[1:12], nrow = 4, ncol = 3)
+cowplot::plot_grid(plotlist = plots[13:24], nrow = 4, ncol = 3)
+cowplot::plot_grid(plotlist = plots[25:36], nrow = 4, ncol = 3)
+cowplot::plot_grid(plotlist = plots[37:48], nrow = 4, ncol = 3)
+cowplot::plot_grid(plotlist = plots[49:60], nrow = 4, ncol = 3)
+
+
+```
+
+
+
+
+

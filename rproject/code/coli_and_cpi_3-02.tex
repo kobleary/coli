@@ -1,0 +1,210 @@
+\documentclass[]{article}
+\usepackage{lmodern}
+\usepackage{amssymb,amsmath}
+\usepackage{ifxetex,ifluatex}
+\usepackage{fixltx2e} % provides \textsubscript
+\ifnum 0\ifxetex 1\fi\ifluatex 1\fi=0 % if pdftex
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+\else % if luatex or xelatex
+  \ifxetex
+    \usepackage{mathspec}
+  \else
+    \usepackage{fontspec}
+  \fi
+  \defaultfontfeatures{Ligatures=TeX,Scale=MatchLowercase}
+\fi
+% use upquote if available, for straight quotes in verbatim environments
+\IfFileExists{upquote.sty}{\usepackage{upquote}}{}
+% use microtype if available
+\IfFileExists{microtype.sty}{%
+\usepackage{microtype}
+\UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
+}{}
+\usepackage[margin=1in]{geometry}
+\usepackage{hyperref}
+\hypersetup{unicode=true,
+            pdftitle={Clean: COLI and CPI},
+            pdfborder={0 0 0},
+            breaklinks=true}
+\urlstyle{same}  % don't use monospace font for urls
+\usepackage{graphicx,grffile}
+\makeatletter
+\def\maxwidth{\ifdim\Gin@nat@width>\linewidth\linewidth\else\Gin@nat@width\fi}
+\def\maxheight{\ifdim\Gin@nat@height>\textheight\textheight\else\Gin@nat@height\fi}
+\makeatother
+% Scale images if necessary, so that they will not overflow the page
+% margins by default, and it is still possible to overwrite the defaults
+% using explicit options in \includegraphics[width, height, ...]{}
+\setkeys{Gin}{width=\maxwidth,height=\maxheight,keepaspectratio}
+\IfFileExists{parskip.sty}{%
+\usepackage{parskip}
+}{% else
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt plus 2pt minus 1pt}
+}
+\setlength{\emergencystretch}{3em}  % prevent overfull lines
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\setcounter{secnumdepth}{0}
+% Redefines (sub)paragraphs to behave more like sections
+\ifx\paragraph\undefined\else
+\let\oldparagraph\paragraph
+\renewcommand{\paragraph}[1]{\oldparagraph{#1}\mbox{}}
+\fi
+\ifx\subparagraph\undefined\else
+\let\oldsubparagraph\subparagraph
+\renewcommand{\subparagraph}[1]{\oldsubparagraph{#1}\mbox{}}
+\fi
+
+%%% Use protect on footnotes to avoid problems with footnotes in titles
+\let\rmarkdownfootnote\footnote%
+\def\footnote{\protect\rmarkdownfootnote}
+
+%%% Change title format to be more compact
+\usepackage{titling}
+
+% Create subtitle command for use in maketitle
+\providecommand{\subtitle}[1]{
+  \posttitle{
+    \begin{center}\large#1\end{center}
+    }
+}
+
+\setlength{\droptitle}{-2em}
+
+  \title{Clean: COLI and CPI}
+    \pretitle{\vspace{\droptitle}\centering\huge}
+  \posttitle{\par}
+    \author{}
+    \preauthor{}\postauthor{}
+    \date{}
+    \predate{}\postdate{}
+  
+
+\begin{document}
+\maketitle
+
+\hypertarget{load-packages}{%
+\subsection{Load packages}\label{load-packages}}
+
+\hypertarget{read-the-data}{%
+\subsection{Read the data}\label{read-the-data}}
+
+\begin{center}\rule{0.5\linewidth}{\linethickness}\end{center}
+
+\hypertarget{cpi}{%
+\section{CPI}\label{cpi}}
+
+\hypertarget{spell-check-cpi-cities}{%
+\subsection{Spell-check CPI Cities}\label{spell-check-cpi-cities}}
+
+\hypertarget{clean-cpi}{%
+\subsection{Clean CPI}\label{clean-cpi}}
+
+\begin{center}\rule{0.5\linewidth}{\linethickness}\end{center}
+
+\hypertarget{coli}{%
+\section{COLI}\label{coli}}
+
+\hypertarget{get-most-frequently-seen-coli-cities}{%
+\subsection{Get most frequently seen COLI
+cities}\label{get-most-frequently-seen-coli-cities}}
+
+There are 91 cities observed at least once a year.
+
+\hypertarget{clean-coli}{%
+\subsection{Clean COLI}\label{clean-coli}}
+
+This removes the 5 entirely blank rows.
+
+\hypertarget{join-ua-geometries}{%
+\subsection{Join UA geometries}\label{join-ua-geometries}}
+
+\hypertarget{join-cbsa-geometries-from-us-census-bureau}{%
+\subsection{Join CBSA geometries from US Census
+Bureau}\label{join-cbsa-geometries-from-us-census-bureau}}
+
+\hypertarget{calculate-distances}{%
+\subsection{Calculate distances}\label{calculate-distances}}
+
+Join the geometries from the CBSA and UA shapefiles loaded above. In
+order to calculate distances, I collapse the CPI and COLI data by city
+(ending up with one row per city to avoid lugging around extra copies of
+the same geometry with each year). Then calculate the centroids of each
+city's geometry, and use \texttt{st\_distance()} from the sf package to
+calculate the distances from each COLI city to each CPI city. This
+results in a 359 x 22 matrix where the names of the nearest city are
+found and saved in a crosswalk data frame.
+
+The crosswalk data frame with each COLI and the corresponding nearest
+CPI will help us join the correct CPI city to the COLI.
+
+\hypertarget{join-geometry-attributes-to-coli-and-cpi}{%
+\subsection{Join geometry attributes to COLI and
+CPI}\label{join-geometry-attributes-to-coli-and-cpi}}
+
+\hypertarget{calculate-distances-across-all-geometries}{%
+\subsubsection{Calculate distances across all
+geometries}\label{calculate-distances-across-all-geometries}}
+
+We have 359 COLI cities attached to geometries and 26 CPI. Note that
+there are more in the entire data set, but could not match upon name to
+CBSA or UA.
+
+\hypertarget{tables-with-cpi-counts}{%
+\subsection{Tables with CPI counts}\label{tables-with-cpi-counts}}
+
+I back out the minimum distances for each year by checking which cities
+are present each year, then referring to the distance matrix for the
+minimum distance of each available city. This is done by removing
+rows/columns that correspond to missing cities in a given year.
+
+\hypertarget{sanity-check-generate-nearest_cpi-column}{%
+\subsubsection{Sanity check: generate nearest\_cpi
+column}\label{sanity-check-generate-nearest_cpi-column}}
+
+We'll add this column to our data frame in case we need to refer to it
+later. This is also a sanity check.
+
+Why are the counts of coli cities observed once each year different from
+those calculated from the nearest cpi list?
+
+\hypertarget{combine-separate-tables-and-write-to-excel-file}{%
+\subsection{Combine separate tables and write to excel
+file}\label{combine-separate-tables-and-write-to-excel-file}}
+
+\hypertarget{create-mapping-between-coli-and-cpi}{%
+\subsection{Create mapping between COLI and
+CPI}\label{create-mapping-between-coli-and-cpi}}
+
+We'll use Houston TX as the base city whose index every year will be the
+denominator in our new index. Because the sample of cities changes each
+quarter, the new indicies generated can be thought of as the price level
+relative to Houston.
+
+\hypertarget{connect-scaled-coli-indicies-to-cpi-time-trend}{%
+\subsection{Connect scaled COLI indicies to CPI time
+trend}\label{connect-scaled-coli-indicies-to-cpi-time-trend}}
+
+First we'll join the corresponding CPI cities to each COLI observation
+by the city name, then add a column \texttt{cpi\_city\_trend} takes COLI
+\texttt{new\_index} value, multiplies it by the corresponding city's
+CPIu value, then divides by 100.
+
+Note that we have some missing data due to the introduction or reshaping
+of CPI cities, like the introduction of the CPI geography
+Washington-Baltimore in 1996 and Phoenix-Mesa-Scottsdale CPI in 2002. We
+can decide if we need to adjust the CPI-COLI pairs to account for these
+geographic sampling differences.
+
+\hypertarget{graphs}{%
+\subsection{Graphs}\label{graphs}}
+
+\begin{center}\rule{0.5\linewidth}{\linethickness}\end{center}
+
+\hypertarget{quantifying-loss}{%
+\subsection{Quantifying loss}\label{quantifying-loss}}
+
+
+\end{document}

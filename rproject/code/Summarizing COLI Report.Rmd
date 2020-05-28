@@ -1,0 +1,173 @@
+---
+title: "Summarizing COLI data"
+author: "Ryan Kobler"
+date: "10/10/2019"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Overview
+
+This document details how we understand the cost of living data and its relationship to the CPI. Let's first bring in the wide data set created with the script reshapeCOLI.R.  
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(xlsx)
+library(readxl)
+library(knitr)
+library(kableExtra)
+
+
+pathname <- "COLI_CITIES_beta.xlsx"
+wide <- read_xlsx(pathname)
+```
+
+### 1. Which cities are observed at least once a year?
+
+Generate T/F variable indicating whether a city was seen consistently each year (note that this does not necessarily mean the city was observed once every quarter, every year--the criteria is at least once a year):
+
+```{r}
+years <- as.character(seq(from = 1990, to = 2019))
+
+wide$city <- wide$URBAN_AREA_NAME
+wide$allyears <- NA
+
+# Gives vector of TRUE/FALSE wherever there is 0/non-zero
+isZero <- function(year){
+  wide[year] == 0
+}
+
+list <- !isZero(years)
+allyears <- apply(list, 1, all)
+wide$allyears <- allyears
+sum(allyears)
+```
+There are 91 cities that have been consistently observed over all years, which are the following:
+
+```{r}
+tbl1 <- wide %>% 
+  filter(allyears == T) %>% 
+  select(city, allyears, years)
+
+tbl1 %>% tbl_df %>% rmarkdown::paged_table()
+```
+
+### 2. Which cities are observed in 90%, 75%, 50% of the years?
+
+Generate a function that take the percentage we're interested in calculating and a data frame to give the number of observations that meet the three criteria above.
+
+```{r}
+# This function takes a boolean vector and sums the true components
+# and divides by the total number of years to get percentage of occurences
+percentTrue <- function(row, pct = 0.5){
+  sum(row) / length(row) >= pct
+}
+
+wide$ninety <- apply(list, 1, percentTrue, pct = 0.9)
+wide$seventyfive <- apply(list, 1, percentTrue, pct = 0.75)
+wide$fifty <- apply(list, 1, percentTrue, pct = 0.5)
+
+sum(wide$ninety) # observations that are observed in 90% of years
+sum(wide$seventyfive) # 75%
+sum(wide$fifty) # 50%
+```
+
+### 3. Which cities are observed at least once every other year?
+
+I don't answer this question exactly, however, the function below gives us the number of observations that do not have consecutive missing data for any pair, triplet, etc. of years. 
+
+
+```{r}
+noConsecFalse <- function(row){
+  falses <- which(row==F)
+  i <- 1
+  while(i <= length(falses) - 1){
+    if(falses[i+1] - falses[i] == 1){
+      return(FALSE)
+    }
+    i <- i + 1
+  }
+  TRUE
+}
+
+wide$everyOther <- apply(list, 1, noConsecFalse)
+sum(wide$everyOther) 
+
+# How many more cities do we capture using the looser threshold?
+
+tbl2 <- wide %>% 
+  select(city, allyears, everyOther, ninety, seventyfive, fifty, years)
+
+tbl2 %>% tbl_df %>% rmarkdown::paged_table()
+```
+
+There are 147 cities that have no more than 1 consecutive missing year.
+
+
+### 4. How many cities in COLI overlap with that of CPI?
+
+Bring in the CPI data and check out the cities we have there.
+
+```{r}
+cpi <- "/Users/ryankobler/Downloads/CPI Data_Final.xlsx"
+cpi <- read_xlsx(cpi)
+
+dim(cpi) # how many obs are we working with?
+
+cpi$city <- as.factor(cpi$City) # which cities are present?
+cpi_cities <- levels(cpi$city)
+length(cpi_cities)
+length(wide$city)
+
+cpi_cities %>% tbl_df %>% 
+  filter(cpi_cities!= "N/A") %>%
+  rmarkdown::paged_table()
+
+
+```
+
+There are 31 cities (excluding the N/A), compared with 679 in COLI, which are observed consistently over time. 
+
+### 5. How does CPI weight their city-level data? *
+According to the overview of the CPI handbook (updated 4/18/2019 and currently saved in our dropbox), the smallest geographic area in which pricing is done are called primary sampling units, or PSUs. There are 87 such PSUs as of 1998. A link to their definitions is located in the dropbox as well. 
+
+Therefore, as I understand it, CPI does not sample at the individual city level. For instance, with the Boston-Cambridge-Newton PSU, we may not be able to tease out the relative "weights" of Boston, Cambridge and Newton because  CPI consideres the entire PSU one stratum with population 4M.
+
+Also, the CPI-city level data does not contain separate indicies for all 87 PSUs listed, rather it seems to take 32 of them (my intuition says that it's those PSUs that are most populus, but still need to figure out why cpi chooses some PSUs over others).
+
+
+### 6. How do our cities map into the CPI level data set?
+How are our cities mapped? What are the boundaries of the COLI data set? To understand this, we may need to dig into the manual that came with the COLI stuff we purchased or reach out to the collectors themselves. The good news is that the cities remain relatively consistent over time with the CPI data and with the COLI, meaning there are no large changes in geography (at least in what each city or MSA is called) over time. This means that understanding how our cities map into CPI is a matter of tracing boundaries associated with each city name. 
+
+### 7. Do the CPI city names change over time? Do the boundaries change over time? *
+It appears that they do--still need to dig into this, or find the definitions of PSUs in past years. We can also figure out whether or not we need the data before 1998.  
+
+
+### Lingering questions:
+
+1. What is the base year in the CPI_Data_Final.xlsx on the DropBox? Is it the same for all years, or is the base year on some cities different? 
+
+2. When you queried the data from BLS (assuming that is where the CPI_Data_Final comes from), did you choose all base or all base (old)?
+
+3. What do the columns mean in CPI data final file?
+
+4. Find out boundaries of the 38 "geographic index areas" the CPI manual mentions. Can item strata vary across space? Or are all 8,000+ space/item combinations with respect to identical item strata? 
+
+5. Does the city-based CPI report on the most populous MSAs? The city names appear to be similar in form to the MSA list, but the BLS doesn't specifically call them MSAs--Metropolitan areas. 
+
+6. What is "Urban Alaska", "Urban Hawaii"?
+
+
+
+
+
+
+
+
+

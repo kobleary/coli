@@ -1,0 +1,407 @@
+---
+title: 'Clean: COLI and CPI'
+output:
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval = TRUE, include = FALSE)
+```
+
+## Load packages
+
+```{r}
+library(readxl)
+library(sf)
+library(stringr)
+library(magrittr)
+library(dplyr)
+library(ggplot2)
+library(here)
+```
+
+## Read the data
+
+```{r}
+coli_path <- "/Users/ryankobler/Desktop/coli research/rproject2/raw_data/COLI Historical Data - 1990 Q1 - 2019 Q1.xlsx"
+coli <- read_excel(coli_path)
+
+coli_counts_path <- "/Users/ryankobler/Desktop/coli research/rproject2/modified_data/COLI_CITIES_beta.xlsx"
+coli_counts <- read_excel(coli_counts_path)
+
+cpi_path <- "/Users/ryankobler/Desktop/coli research/rproject2/raw_data/CPI Data_Final.xlsx"
+cpi <- read_excel(cpi_path)
+```
+* * *
+
+# CPI 
+
+## Spell-check CPI Cities
+
+```{r}
+cpi %<>%
+  dplyr::rename(city = City) %>%
+  dplyr::group_by(city) %>%
+  dplyr::mutate(n_years = n()) %>%
+  filter(!is.na(State)) %>%
+  rename(year = Year)
+
+# Table of cities and the number of years they've been observed
+cpi %>%
+  dplyr::group_by(city) %>%
+  dplyr::summarise(n_years = n_years[1]) %>%
+  arrange(n_years)
+
+cpi$city <- plyr::revalue(cpi$city, 
+        c("Cleveland-Akron" = "Cleveland", 
+          "Dallas-Forth Worth-Arlington" = "Dallas-Fort Worth-Arlington", 
+          #"Los Angeles-Riverside-Orange County" = "Los Angeles-Long Beach-Anaheim",
+          "Cincinnati-Hamilton" = "Cincinnati",
+          "Pheonix-Mesa-Scottsdale" = "Phoenix-Mesa-Scottsdale",
+          "San Diego-Carsbad" = "San Diego-Carlsbad",
+          "Urban Hawaii" = "Urban Honolulu",
+          "Portland-Salem" = "Portland-Vancouver-Hillsboro"))
+```
+
+
+## Read CBSA geometries from US Census Bureau
+
+```{r}
+cbsas <- st_read("/Users/ryankobler/Desktop/coli research/rproject2/raw_data/shapefiles/tl_2017_us_cbsa/tl_2017_us_cbsa.shp")
+# Keep only the city name, drop the state. Extract city transforms 
+# "Portland, OR" -> "Portland"
+extractCity <- function(string){
+    unlist(str_split(string, ", "))[1]
+}
+
+# Save shorter cities in new column
+cbsas$city <- sapply(cbsas$NAMELSAD, extractCity) 
+
+# gives list of only the metropolitan (excluding micropolitan) area names
+metro_areas <- cbsas$NAMELSAD[grepl("Metro", cbsas$NAMELSAD)]
+metro_areas <- sapply(metro_areas, extractCity)
+
+cbsas_metro <- cbsas %>%
+  filter(grepl("Metro", NAMELSAD)) %>%
+  select(city, NAMELSAD) 
+```
+
+* * *
+
+# COLI
+
+## Get most frequently seen COLI cities
+There are 91 cities observed at least once a year. 
+
+```{r}
+colnames(coli) <- tolower(colnames(coli))
+
+coli$city <- coli$urban_area_name
+
+# removes 5 blank rows
+coli %<>% 
+  filter(!is.na(quarter)) 
+
+coliq <- coli %>%
+  filter(quarter == "Q2")
+#
+# Count frequency per year
+counts <- table(coli$urban_area_name, coli$year)
+
+# Find all the entries in the table where the yearly counts are 0 and sum
+# the true/false over all years.
+zeroes <- rowSums(counts == 0)
+
+# We're interested in the cities that were observed at least once a year, 
+# save the names of these in a list
+coli_greatest_hits <- names(zeroes[zeroes == 0])
+```
+
+## Read UA geometries
+```{r}
+uas <- st_read("/Users/ryankobler/Desktop/coli research/rproject2/raw_data/shapefiles/tl_2017_us_uac10/tl_2017_us_uac10.shp")
+# Transform UA city names ("City, ST") to the format from COLI ("City ST")
+uas$city <- paste(uas$NAME10, collapse = "|") %>%
+  str_replace_all(string = ., 
+                  pattern = ", ", 
+                  replacement = " ") %>%
+  strsplit(split = "\\|") %>%
+  unlist()
+```
+
+
+# Calculate distances 
+Join the geometries from the CBSA and UA shapefiles loaded above. 
+
+In order to calculate distances, 
+
+- Variables `cpi_geo_trim` are collapsed versions of the joined CPI and COLI data by city (each observation is a city. This is to avoid lugging around extra copies of the same geometry with each year). 
+
+- Calculate the centroids of each city's polygon
+
+- Use `st_distance()` from the `sf` package to calculate the distances from each COLI city to each CPI city. Results in a 359 (# coli cities) x 22 (# cpi cities) matrix. 
+
+- Calculate and store the names of the nearest city in a crosswalk to join to each coli COLI city the correct CPI index data from the closest CPI  
+
+## Join geometry attributes to COLI and CPI
+```{r}
+# # Calculate minimum distance centroid for each polygon
+# cpi_geo <- left_join(cbsas, cpi, by = "city") %>%
+#   filter(city %in% unique(cpi$city))
+# 
+# coli_geo <- left_join(uas, coli, by = "city") %>%
+#   filter(URBAN_AREA_NAME %in% unique(coli$URBAN_AREA_NAME))
+
+# cut the data set so we're left with all cities w/ corresp geometry.
+# the remaining 
+cpi_geo_trim <- left_join(cbsas, cpi, by = "city") %>%
+  filter(city %in% unique(cpi$city)) %>%
+  dplyr::group_by(city) %>%
+  dplyr::summarize(n = n()) 
+
+coli_geo_trim <- left_join(uas, coli, by = "city") %>%
+  filter(urban_area_name %in% unique(coli$urban_area_name)) %>%
+  dplyr::group_by(city) %>%
+  dplyr::summarize(n = n()) 
+
+cpi_geo_trim$centroid <- cpi_geo_trim %>%
+  st_transform(29101) %>% 
+  st_centroid() %>% 
+  # this is the crs from d, which has no EPSG code:
+  st_transform(., '+proj=longlat +ellps=GRS80 +no_defs') %>%
+  # since you want the centroids in a second geometry col:
+  st_geometry()
+# Calculate distances between centroid of each city
+
+coli_geo_trim$centroid <- coli_geo_trim %>%
+  st_transform(29101) %>% 
+  st_centroid() %>% 
+  # this is the crs from d, which has no EPSG code:
+  st_transform(., '+proj=longlat +ellps=GRS80 +no_defs') %>%
+  # since you want the centroids in a second geometry col:
+  st_geometry()
+```
+
+### Calculate distances across all geometries
+We have 359 COLI cities attached to geometries and 26 CPI. Note that there are more in the entire data set, but could not match upon name to CBSA or UA. 
+
+```{r}
+# get distances between each COLI-CPI pair
+dist.matrix <- st_distance(coli_geo_trim$centroid, 
+                       cpi_geo_trim$centroid)
+ 
+colnames(dist.matrix) <- cpi_geo_trim$city
+rownames(dist.matrix) <- coli_geo_trim$city
+```
+
+## Table of CPI counts
+I back out the minimum distances for each year by checking which cities are present each year, then referring to the distance matrix for the minimum distance of each available city. This is done by removing rows/columns that correspond to missing cities in a given year. 
+
+```{R}
+# change matrix to data frame to call coli city names more easily
+dist.df <- as.data.frame(dist.matrix) %>%
+  mutate(city = rownames(dist.matrix)) %>%
+  filter_at(vars(-c(city)), any_vars(!is.na(.))) %>%
+  select_if(~sum(!is.na(.)) > 0)
+
+nearest_cpi <- list()
+yrs <- c(1990:2018)
+qtr <- "Q2" # pick a quarter to pull each coli city (could decide if
+# we want to interpolate here instead and if the results are robust
+# to the quarter that is chosen).
+crosswalk <- data.frame(city = NA,
+                 nearest_cpi = NA,
+                 year = NA)
+for(y in yrs){
+  # warning: coli_city gives cities observed in at least one quarter of
+  # a given year
+  i <- as.character(y)
+  
+  coli_city <- coli %>%
+    filter(year == y & quarter == qtr) %>%
+    pull(urban_area_name) %>% unique() %>% as.character()
+  
+  # get list of cpi cities in particular year
+  cpi_city <- cpi %>%
+    filter(year == y) %>%
+    pull(city) %>% unique() %>% as.character()
+  
+  # gets the rows and columns (cpi and coli city names) from the full coli that have 
+  # geometries
+  cols <- colnames(dist.df)[colnames(dist.df) %in% cpi_city]
+  rows <- dist.df$city[dist.df$city %in% coli_city]
+  
+  # subset dist.df by row and column of the coli/cpi cities present in year y
+  dist.df %<>% filter(city %in% rows) %>%
+    select(cols, city)
+  
+  # find minimum distances on the relevant cities
+  min_dist_index <- apply(dist.df %>% select(-city), 
+                          1, function(row) which.min(row)) %>%
+    unlist()
+  
+  nearest_cpi[i] <- colnames(dist.df)[min_dist_index] %>%
+    list()
+  
+  
+  # create df to save the nearest_cpi in by year
+  crosswalk <- rbind(crosswalk, 
+                     data.frame(city = as.character(dist.df$city),
+             nearest_cpi = unlist(nearest_cpi[i]),
+             year = y))
+}
+```
+
+### Sanity check: generate nearest_cpi column
+We'll add this column to our data frame in case we need to refer to it later. This is also a sanity check. 
+
+Why are the counts of coli cities observed once each year different from
+those calculated from the nearest cpi list?
+
+```{r}
+sapply(nearest_cpi, length)
+n.obs.each.year <- coli %>%
+  group_by(year, URBAN_AREA_NAME) %>%
+  summarize(n = n()) %>%
+  group_by(year) %>%
+  summarize(n = n())
+n.obs.each.year
+```
+
+## Combine separate tables and write to excel file
+The final product, `joined` table, counts the number of COLI cities matched to a CPI within a given year. This gives us intuition for which CPI city time-trends dominate the COLI index.
+
+```{r}
+tables <- lapply(nearest_cpi, as.data.frame(table))
+
+for(i in 1:length(tables)){
+  colnames(tables[[i]]) <- c("CPI", as.character(yrs[i]))
+}
+
+# Join all tables into single df
+joined <- full_join(tables[[1]], tables[[2]], by = "CPI")
+for(i in 3:length(tables)){
+  joined <- joined %>%
+  full_join(tables[[i]])
+}
+
+# xlsx::write.xlsx(joined, "cpi_geom_counts.xlsx",
+#            sheetName = "All years", row.names = F,
+#            append = F)
+```
+
+## Find the nearest CPI using Euclidean distance
+```{R}
+# 60-length vector of indicies denoting which column index has the smallest distance from the place
+# located in row i.
+min_dist <- apply(dist.matrix, 1, function(row) which.min(row))
+min_dist_trim <- min_dist[names(min_dist) %in% coli_greatest_hits]
+
+nearest_cpi <- colnames(dist.matrix)[unlist(min_dist_trim)]
+
+# Fairbanks did not have an associated closest cpi
+coarse_crosswalk <- data.frame(nearest_coli = dplyr::setdiff(names(min_dist_trim), 
+                                       "Fairbanks AK"),
+           nearest_cpi = nearest_cpi) %>%
+  mutate(city = nearest_coli)
+
+```
+
+
+## Calculate new index
+We'll use a the base city whose index every year will be the denominator in our new index. Because the sample of cities changes each quarter, the new indicies are price levels relative to Houston. 
+
+Then we'll join the corresponding CPI cities to each COLI observation by the city name. Add a column `cpi_city_trend` takes COLI `new_index` value, multiplies it by the corresponding city's CPIu value, then divides by 100. 
+
+```{r}
+# decide what to do about choosing a quarter--try varying which quarter is chosen
+coliq <- coli %>% 
+  filter(!is.na(nearest_cpi), quarter == "Q2") %>%
+  left_join(crosswalk, by = c("city", "year")) %>%
+  left_join(cpi, by = c("nearest_cpi" = "city", "year")) # add nearest cpi
+
+city <- c("Houston TX", "Atlanta GA", "Spokane WA", "Columbia MO", "Amarillo TX")
+
+genTimeTrend <- function(cityname){
+  # Create separate data frame with only one city's COLI values over time (filter
+  # out all other cities)
+  fixedpoint <- coliq %>%
+    filter(city == cityname) %>%
+    dplyr::rename(fixedpt_index = composite_index) %>%
+    select(fixedpt_index, year)
+  
+  # Generate new_index column that scales each index by Atlanta's
+  # index. So Atlanta's index will be equal to 100 each quarter. 
+  coliq %>% 
+    dplyr::left_join(fixedpoint, by = "year") %>%
+    dplyr::mutate(new_index = (composite_index / fixedpt_index) * 100) %>%
+    mutate(cpi_time_trend = new_index * CPIu / 100) %>% #connect scaled COLI 
+    #indicies to CPI time trend
+    select(year, quarter, city, nearest_cpi, CPIu, composite_index, 
+           fixedpt_index, new_index,
+           cpi_time_trend, n_years, everything()) %>% pull(cpi_time_trend)
+}
+
+coliq$my_index_ga <- genTimeTrend("Atlanta GA")
+coliq$my_index_tx <- genTimeTrend("Houston TX")
+coliq$my_index_mo <- genTimeTrend("Columbia MO")
+coliq$my_index_oh <- genTimeTrend("Dayton OH")
+
+
+```
+
+Note that we have some missing data due to the introduction or reshaping of CPI cities, like the introduction of the CPI geography Washington-Baltimore in 1996 and Phoenix-Mesa-Scottsdale CPI in 2002. We can decide if we need to adjust the CPI-COLI pairs to account for geographic sampling differences. 
+
+## Write cleaned data frame to csv
+```{r}
+write.csv(coliq, "/Users/ryankobler/Desktop/coli research/rproject2/modified_data/coli_4-25")
+write.csv(cpi, here::here("modified_data", "cpi_cleaned_3-02.csv"))
+
+```
+
+## Graphs
+
+```{r}
+# var(testy$CPIu, na.rm = T)
+# var(testy$COMPOSITE_INDEX)
+# var(testy$cpi_time_trend, na.rm = T)
+# 
+# graphy <- ggplot(data = testy %>% filter(city == "Spokane WA"),
+#                  aes(x = YEAR, y = cpi_time_trend)) + 
+#   geom_line() +
+#   labs(title = "Spokane, WA COLI index time-trended to CPI") 
+# #graphy
+# 
+# graphy2 <- ggplot(data = testy %>% filter(city == "Spokane WA"), 
+#                   aes(x = YEAR, y = CPIu)) + 
+#   geom_line() +
+#   labs(title = "Spokane, WA CPI") 
+#graphy2
+```
+* * *
+
+## Quantifying loss
+
+```{R}
+
+
+```
+
+### Why missingness?
+
+1) Naming: The cities below are in the observed every year coli data frame but don't have a corresponding geometry. For instance Denver CO is called Denver--Aurora CO.
+```{R}
+setdiff(coli_greatest_hits, coli_geo_trim$city)
+coli_greatest_hits[coli_greatest_hits %in% coli_geo_trim$city]
+```
+
+2) Choice of quarter: each city needed to be observed every year in quarter 2. We could substitute in Q3 or Q1 for cities missing a COLI index within a given year. 
+
+```{R}
+quarter <- coli %>%
+  filter(QUARTER == "Q2")
+counts <- table(quarter$city, quarter$year)
+zeroes <- rowSums(counts == 0)
+coli_greatest_hits2 <- names(zeroes[zeroes == 0])
+coli_greatest_hits2 # gives all cities observed within a given quarter
+```
